@@ -1,6 +1,7 @@
 package com.example.cleannote
 
 import android.annotation.SuppressLint
+import android.content.Intent
 import android.os.Bundle
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
@@ -10,6 +11,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.ActivityResultLauncher
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
@@ -23,38 +26,77 @@ import androidx.compose.ui.viewinterop.AndroidView
 import com.example.cleannote.ui.theme.CleanNoteTheme
 
 class MainActivity : ComponentActivity() {
+    private lateinit var paymentLauncher: ActivityResultLauncher<Intent>
+    private var mainWebView: WebView? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        
+        // 결제 앱 결과 처리를 위한 런처 등록
+        paymentLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            if (result.resultCode == RESULT_OK) {
+                val data = result.data
+                // 결제 앱에서 반환한 결과(예: 승인번호 등)를 웹뷰로 전달
+                val resultJson = "{ \"status\": \"success\", \"data\": \"${data?.toUri(0)}\" }"
+                mainWebView?.evaluateJavascript("window.onPaymentResult($resultJson)", null)
+                Toast.makeText(this, "결제 성공", Toast.LENGTH_SHORT).show()
+            } else {
+                mainWebView?.evaluateJavascript("window.onPaymentResult({ \"status\": \"fail\" })", null)
+                Toast.makeText(this, "결제 취소/실패", Toast.LENGTH_SHORT).show()
+            }
+        }
+
         enableEdgeToEdge()
         setContent {
             CleanNoteTheme {
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
                     WebViewScreen(
                         url = "http://139.150.82.48:8023/",
-                        modifier = Modifier.padding(innerPadding)
+                        modifier = Modifier.padding(innerPadding),
+                        onWebViewCreated = { mainWebView = it }
                     )
                 }
             }
         }
     }
+
+    // 결제 앱(ACheck-AppCall) 호출 함수
+    fun startPaymentApp(amount: String, datano: String, paymentType: String, installment: String) {
+        try {
+            val intent = Intent().apply {
+                // TODO: 문서에 명시된 정확한 Action 또는 Package/Class 명칭을 입력하세요.
+                // 예: action = "com.acheck.appcall.PAYMENT" 
+                // 또는 setClassName("com.acheck.appcall", "com.acheck.appcall.PaymentActivity")
+                
+                // 문서 규격에 따른 Extra 데이터 세팅 (예시)
+                putExtra("REQ_TYPE", if (paymentType == "8") "CARD" else "CASH")
+                putExtra("TOTAL_AMT", amount.toLongOrNull() ?: 0L)
+                putExtra("ORDER_NO", datano)
+                putExtra("INSTALLMENT", installment)
+                
+                // 기타 ACheck 문서에서 요구하는 필드들을 추가하세요.
+                putExtra("TERMINAL_ID", "테스트ID") 
+            }
+            paymentLauncher.launch(intent)
+        } catch (e: Exception) {
+            Toast.makeText(this, "결제 앱을 실행할 수 없습니다.", Toast.LENGTH_SHORT).show()
+        }
+    }
 }
 
-// 웹과 앱 사이의 통신을 담당하는 클래스
-class WebAppInterface(private val activity: ComponentActivity) {
+class WebAppInterface(private val activity: MainActivity) {
     @JavascriptInterface
-    fun processPayment(amount: String) {
-        // 웹에서 보낸 금액을 받아 처리하는 부분
+    fun processPayment(amount: String, datano: String, paymentType: String, installment: String) {
         activity.runOnUiThread {
-            // 실제 결제 SDK 호출 로직이 여기에 들어갑니다.
-            Toast.makeText(activity, "결제 요청 금액: ${amount}원", Toast.LENGTH_LONG).show()
+            // Intent 호출 실행
+            activity.startPaymentApp(amount, datano, paymentType, installment)
         }
     }
 }
 
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
-fun WebViewScreen(url: String, modifier: Modifier = Modifier) {
-    val context = androidx.compose.ui.platform.LocalContext.current
+fun WebViewScreen(url: String, modifier: Modifier = Modifier, onWebViewCreated: (WebView) -> Unit) {
     var webView: WebView? by remember { mutableStateOf(null) }
     var canGoBack by remember { mutableStateOf(false) }
 
@@ -74,17 +116,12 @@ fun WebViewScreen(url: String, modifier: Modifier = Modifier) {
                 }
                 settings.javaScriptEnabled = true
                 settings.domStorageEnabled = true
-                
-                // JavaScript Interface 등록
-                // 웹에서 window.Android.processPayment(금액) 으로 호출 가능
-                addJavascriptInterface(WebAppInterface(ctx as ComponentActivity), "Android")
-
+                addJavascriptInterface(WebAppInterface(ctx as MainActivity), "Android")
                 loadUrl(url)
+                onWebViewCreated(this)
                 webView = this
             }
         },
-        update = {
-            webView = it
-        }
+        update = { webView = it }
     )
 }
