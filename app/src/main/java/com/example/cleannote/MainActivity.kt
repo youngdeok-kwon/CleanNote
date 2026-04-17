@@ -69,8 +69,8 @@ class MainActivity : ComponentActivity() {
 
     // 결과 팝업 (인쇄 선택 기능 포함)
     private fun showPaymentResultDialog(
-        title: String, 
-        message: String, 
+        title: String,
+        message: String,
         showPrintOption: Boolean = false,
         onPrintAction: (() -> Unit)? = null
     ) {
@@ -79,7 +79,7 @@ class MainActivity : ComponentActivity() {
                 .setTitle(title)
                 .setMessage(message)
                 .setCancelable(false)
-            
+
             if (showPrintOption && onPrintAction != null) {
                 builder.setPositiveButton("인쇄") { dialog, _ ->
                     onPrintAction()
@@ -118,7 +118,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        
+
         paymentLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
             val data = result.data
             if (result.resultCode == RESULT_OK && data != null) {
@@ -150,7 +150,7 @@ class MainActivity : ComponentActivity() {
                 val isSuccess = resultCode == "0000"
                 val status = if (isSuccess) "success" else "fail"
                 val resultJson = """{ "status": "$status", "resultCode": "$resultCode", "resultMsg": "$resultMsg", "approvalNum": "$approvalNum", "approvalDate": "$approvalDate", "cardName": "$cardName", "cardNum": "$cardNum", "totalAmount": "$totalAmount" }"""
-                
+
                 mainWebView?.evaluateJavascript("window.onPaymentResult($resultJson)", null)
 
                 if (isSuccess) {
@@ -199,7 +199,7 @@ class MainActivity : ComponentActivity() {
                     WebViewScreen(
                         url = getServerUrl(),
                         modifier = Modifier.padding(innerPadding),
-                        onWebViewCreated = { 
+                        onWebViewCreated = {
                             mainWebView = it
                             if (!isDeviceInitialized) initPaymentDevice()
                         }
@@ -227,6 +227,44 @@ class MainActivity : ComponentActivity() {
     fun printKiccReceipt(amount: String, cardName: String, cardNum: String, approvalNum: String, approvalDate: String) {
         thread {
             try {
+                val CRLF = "\r\n"
+                val sb = StringBuilder().apply {
+                    append("C").append(CRLF)
+                    if (cardName == "현금영수증") append("T220      [ 현 금 영 수 증 ]").append(CRLF)
+                    else append("T220      [ 영 수 증 ]").append(CRLF)
+                    append("L24").append(CRLF)
+                    append("T110금    액 : ${amount}원").append(CRLF)
+                    if (cardName != "현금영수증") {
+                        append("T110카 드 명 : ${cardName}").append(CRLF)
+                        append("T110카드번호 : ${cardNum}").append(CRLF)
+                    }
+                    append("T110승인번호 : ${approvalNum}").append(CRLF)
+                    append("T110승인일시 : ${approvalDate}").append(CRLF)
+                    append("T110--------------------------------").append(CRLF)
+                    append("T110  세차노트를 이용해 주셔서 감사합니다.").append(CRLF)
+                    append("L120").append(CRLF)
+                    append("PCF").append(CRLF)
+                }
+                val file = File(Environment.getExternalStorageDirectory(), "print_kicc.txt")
+                if (file.exists()) file.delete()
+                file.writeBytes(sb.toString().toByteArray(charset("EUC-KR")))
+                runOnUiThread {
+                    val intent = Intent(Intent.ACTION_MAIN).apply {
+                        addCategory(Intent.CATEGORY_LAUNCHER)
+                        component = ComponentName("kr.co.kicc.aproject", "kr.co.kicc.aproject.callpopup.CallPopup")
+                        putExtra("TRAN_NO", createDefaultDataNo())
+                        putExtra("TRAN_TYPE", "F5")
+                        putExtra("PRINT_DATA", file.absolutePath)
+                        putExtra("PACKAGE_NAME", packageName)
+                    }
+                    paymentLauncher.launch(intent)
+                }
+            } catch (e: Exception) { sendLogToWeb("ERROR", "Print Failed: ${e.message}") }
+        }
+    }
+    fun __printKiccReceipt(amount: String, cardName: String, cardNum: String, approvalNum: String, approvalDate: String) {
+        thread {
+            try {
                 val sb = StringBuilder()
                 if (cardName == "현금영수증") sb.append("      [ 현 금 영 수 증 ]\n\n")
                 else sb.append("      [ 영 수 증 ]\n\n")
@@ -243,7 +281,7 @@ class MainActivity : ComponentActivity() {
                 val directory = Environment.getExternalStorageDirectory()
                 val file = File(directory, "print.txt")
                 if (file.exists()) file.delete()
-                
+
                 // [수정] 인쇄용 텍스트를 EUC-KR 인코딩으로 저장하여 한글 깨짐 방지
                 file.writeBytes(sb.toString().toByteArray(charset("EUC-KR")))
 
@@ -268,7 +306,7 @@ class MainActivity : ComponentActivity() {
                 sendLogToWeb("ERROR", "Print Preparation Failed: $errorMsg")
                 runOnUiThread {
                     showPaymentResultDialog(
-                        "인쇄 준비 실패", 
+                        "인쇄 준비 실패",
                         "파일 생성 중 오류가 발생했습니다.\n\n사유: $errorMsg\n\n휴대폰 설정 > 앱 > CleanNote > 권한에서 '저장공간'을 허용했는지 확인해 주세요."
                     )
                 }
@@ -280,10 +318,10 @@ class MainActivity : ComponentActivity() {
         val provider = getPaymentProvider()
         if (provider == "KICC") {
             when (paymentType) {
-                "D4" -> startKiccCancel(amount, datano, installment)
-                "A9" -> startKiccSerialCancel(amount, datano, installment)
-                "B1" -> startKiccCashReceipt(amount, datano)
-                else -> startKiccPayment(amount, datano, paymentType, installment)
+            "D4" -> startKiccCancel(amount, datano, installment)
+            "A9" -> startKiccSerialCancel(amount, datano, installment)
+            "B1" -> startKiccCashReceipt(amount, datano)
+            else -> startKiccPayment(amount, datano, paymentType, installment)
             }
         }
     }
@@ -332,9 +370,9 @@ class MainActivity : ComponentActivity() {
                 val parts = installment.split("|")
                 if (parts.size >= 3) {
                     putExtra("INSTALLMENT", "00")
-                    putExtra("ORG_APPROVAL_NUM", parts[1].trim())
+                    putExtra("APPROVAL_NO", parts[1].trim())
                     val date = parts[2].trim().let { if(it.length==8) it.substring(2) else it }
-                    putExtra("ORG_APPROVAL_DATE", date)
+                    putExtra("APPROVAL_DATE", date)
                 }
             }
             if (IS_DEBUG) showIntentDebugDialog("KICC 취소", intent) { paymentLauncher.launch(intent) }
@@ -353,7 +391,7 @@ class MainActivity : ComponentActivity() {
                 val parts = installment.split("|")
                 if (parts.size >= 3) {
                     putExtra("INSTALLMENT", "00")
-                    putExtra("APPROVAL_NUM", parts[1].trim())
+                    putExtra("APPROVAL_NO", parts[1].trim())
                     val date = parts[2].trim().let { if(it.length==8) it.substring(2) else it }
                     putExtra("APPROVAL_DATE", date)
                 }
