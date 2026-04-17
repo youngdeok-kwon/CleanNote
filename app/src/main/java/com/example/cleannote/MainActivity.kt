@@ -230,7 +230,7 @@ class MainActivity : ComponentActivity() {
                 val CRLF = "\r\n"
                 val sb = StringBuilder().apply {
                     append("C").append(CRLF)
-                    if (cardName == "현금영수증") append("T220      [ 현 금 영 수 증 ]").append(CRLF)
+                    if (cardName == "현금영수증") append("T220   [ 현 금 영 수 증 ]").append(CRLF)
                     else append("T220      [ 영 수 증 ]").append(CRLF)
                     append("L24").append(CRLF)
                     append("T110금    액 : ${amount}원").append(CRLF)
@@ -260,57 +260,6 @@ class MainActivity : ComponentActivity() {
                     paymentLauncher.launch(intent)
                 }
             } catch (e: Exception) { sendLogToWeb("ERROR", "Print Failed: ${e.message}") }
-        }
-    }
-    fun __printKiccReceipt(amount: String, cardName: String, cardNum: String, approvalNum: String, approvalDate: String) {
-        thread {
-            try {
-                val sb = StringBuilder()
-                if (cardName == "현금영수증") sb.append("      [ 현 금 영 수 증 ]\n\n")
-                else sb.append("      [ 영 수 증 ]\n\n")
-                sb.append("금    액 : ${amount}원\n")
-                if (cardName != "현금영수증") {
-                    sb.append("카 드 명 : ${cardName}\n")
-                    sb.append("카드번호 : ${cardNum}\n")
-                }
-                sb.append("승인번호 : ${approvalNum}\n")
-                sb.append("승인일시 : ${approvalDate}\n")
-                sb.append("--------------------------------\n")
-                sb.append("  세차노트를 이용해 주셔서 감사합니다.\n\n\n\n")
-
-                val directory = Environment.getExternalStorageDirectory()
-                val file = File(directory, "print.txt")
-                if (file.exists()) file.delete()
-
-                // [수정] 인쇄용 텍스트를 EUC-KR 인코딩으로 저장하여 한글 깨짐 방지
-                file.writeBytes(sb.toString().toByteArray(charset("EUC-KR")))
-
-                val filePath = file.absolutePath
-                sendLogToWeb("FILE_PREPARED", "Path: $filePath")
-
-                runOnUiThread {
-                    val intent = Intent(Intent.ACTION_MAIN).apply {
-                        addCategory(Intent.CATEGORY_LAUNCHER)
-                        component = ComponentName("kr.co.kicc.aproject", "kr.co.kicc.aproject.callpopup.CallPopup")
-                        putExtra("TRAN_NO", createDefaultDataNo())
-                        putExtra("TRAN_TYPE", "F5")
-                        putExtra("PRINT_DATA", filePath)
-                        putExtra("PACKAGE_NAME", packageName)
-                    }
-                    showIntentDebugDialog("KICC 인쇄 요청", intent) {
-                        paymentLauncher.launch(intent)
-                    }
-                }
-            } catch (e: Exception) {
-                val errorMsg = e.message ?: "Unknown Error"
-                sendLogToWeb("ERROR", "Print Preparation Failed: $errorMsg")
-                runOnUiThread {
-                    showPaymentResultDialog(
-                        "인쇄 준비 실패",
-                        "파일 생성 중 오류가 발생했습니다.\n\n사유: $errorMsg\n\n휴대폰 설정 > 앱 > CleanNote > 권한에서 '저장공간'을 허용했는지 확인해 주세요."
-                    )
-                }
-            }
         }
     }
 
