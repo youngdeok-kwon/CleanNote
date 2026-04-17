@@ -58,6 +58,12 @@ class MainActivity : ComponentActivity() {
     private val DEFAULT_PORT = "8023"
     private val DEFAULT_PROVIDER = "KICC"
 
+    // 가맹점 정보 상수
+    private val KEY_MERCHANT_NAME = "merchant_name"
+    private val KEY_MERCHANT_ADDRESS = "merchant_address"
+    private val DEFAULT_MERCHANT_NAME = ""
+    private val DEFAULT_MERCHANT_ADDRESS = ""
+
     private fun sendLogToWeb(tag: String, message: String) {
         val fullLog = "[$tag] $message"
         Log.d("CleanNoteLog", fullLog)
@@ -156,7 +162,14 @@ class MainActivity : ComponentActivity() {
                 if (isSuccess) {
                     if (tranType == "D4" || tranType == "A9") {
                         mainWebView?.evaluateJavascript("window.onCardCancelResult('0000', '취소성공')", null)
-                        showPaymentResultDialog("취소 성공", "결제 취소가 완료되었습니다.")
+                        showPaymentResultDialog(
+                            title = "취소 성공",
+                            message = "금액: ${totalAmount}원\n승인번호: $approvalNum\n카드: $cardName\n\n취소 영수증을 인쇄하시겠습니까?",
+                            showPrintOption = true,
+                            onPrintAction = {
+                                printKiccCancelReceipt(totalAmount, cardName, cardNum, approvalNum, approvalDate)
+                            }
+                        )
                     } else if (tranType == "B1") {
                         showPaymentResultDialog(
                             title = "현금영수증 발행 성공",
@@ -228,11 +241,16 @@ class MainActivity : ComponentActivity() {
         thread {
             try {
                 val CRLF = "\r\n"
+                val merchantName = getMerchantName()
+                val merchantAddress = getMerchantAddress()
                 val sb = StringBuilder().apply {
                     append("C").append(CRLF)
                     if (cardName == "현금영수증") append("T220   [ 현 금 영 수 증 ]").append(CRLF)
                     else append("T220      [ 영 수 증 ]").append(CRLF)
                     append("L24").append(CRLF)
+                    if (merchantName.isNotEmpty()) append("T110가맹점명 : ${merchantName}").append(CRLF)
+                    if (merchantAddress.isNotEmpty()) append("T110주    소 : ${merchantAddress}").append(CRLF)
+                    if (merchantName.isNotEmpty() || merchantAddress.isNotEmpty()) append("T110--------------------------------").append(CRLF)
                     append("T110금    액 : ${amount}원").append(CRLF)
                     if (cardName != "현금영수증") {
                         append("T110카 드 명 : ${cardName}").append(CRLF)
@@ -260,6 +278,49 @@ class MainActivity : ComponentActivity() {
                     paymentLauncher.launch(intent)
                 }
             } catch (e: Exception) { sendLogToWeb("ERROR", "Print Failed: ${e.message}") }
+        }
+    }
+
+    fun printKiccCancelReceipt(amount: String, cardName: String, cardNum: String, approvalNum: String, approvalDate: String) {
+        thread {
+            try {
+                val CRLF = "\r\n"
+                val merchantName = getMerchantName()
+                val merchantAddress = getMerchantAddress()
+                val sb = StringBuilder().apply {
+                    append("C").append(CRLF)
+                    append("T220   [ 취 소 영 수 증 ]").append(CRLF)
+                    append("L24").append(CRLF)
+                    if (merchantName.isNotEmpty()) append("T110가맹점명 : ${merchantName}").append(CRLF)
+                    if (merchantAddress.isNotEmpty()) append("T110주    소 : ${merchantAddress}").append(CRLF)
+                    if (merchantName.isNotEmpty() || merchantAddress.isNotEmpty()) append("T110--------------------------------").append(CRLF)
+                    append("T110취소금액 : ${amount}원").append(CRLF)
+                    if (cardName.isNotEmpty()) {
+                        append("T110카 드 명 : ${cardName}").append(CRLF)
+                        append("T110카드번호 : ${cardNum}").append(CRLF)
+                    }
+                    append("T110승인번호 : ${approvalNum}").append(CRLF)
+                    append("T110취소일시 : ${approvalDate}").append(CRLF)
+                    append("T110--------------------------------").append(CRLF)
+                    append("T110  세차노트를 이용해 주셔서 감사합니다.").append(CRLF)
+                    append("L120").append(CRLF)
+                    append("PCF").append(CRLF)
+                }
+                val file = File(Environment.getExternalStorageDirectory(), "print_kicc.txt")
+                if (file.exists()) file.delete()
+                file.writeBytes(sb.toString().toByteArray(charset("EUC-KR")))
+                runOnUiThread {
+                    val intent = Intent(Intent.ACTION_MAIN).apply {
+                        addCategory(Intent.CATEGORY_LAUNCHER)
+                        component = ComponentName("kr.co.kicc.aproject", "kr.co.kicc.aproject.callpopup.CallPopup")
+                        putExtra("TRAN_NO", createDefaultDataNo())
+                        putExtra("TRAN_TYPE", "F5")
+                        putExtra("PRINT_DATA", file.absolutePath)
+                        putExtra("PACKAGE_NAME", packageName)
+                    }
+                    paymentLauncher.launch(intent)
+                }
+            } catch (e: Exception) { sendLogToWeb("ERROR", "CancelPrint Failed: ${e.message}") }
         }
     }
 
@@ -367,6 +428,22 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun createDefaultDataNo() = SimpleDateFormat("yyyyMMddHHmmss", Locale.getDefault()).format(Date())
+    private fun getMerchantName(): String {
+        val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        return prefs.getString(KEY_MERCHANT_NAME, DEFAULT_MERCHANT_NAME) ?: DEFAULT_MERCHANT_NAME
+    }
+    private fun getMerchantAddress(): String {
+        val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        return prefs.getString(KEY_MERCHANT_ADDRESS, DEFAULT_MERCHANT_ADDRESS) ?: DEFAULT_MERCHANT_ADDRESS
+    }
+    fun saveMerchantConfig(name: String, address: String) {
+        getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit().apply {
+            putString(KEY_MERCHANT_NAME, name)
+            putString(KEY_MERCHANT_ADDRESS, address)
+            apply()
+        }
+        Toast.makeText(this, "가맹점 정보가 저장되었습니다.", Toast.LENGTH_SHORT).show()
+    }
     private fun getServerUrl(): String {
         val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val host = prefs.getString(KEY_HOST, DEFAULT_HOST) ?: DEFAULT_HOST
@@ -393,6 +470,10 @@ class WebAppInterface(private val activity: MainActivity) {
     @JavascriptInterface
     fun setServerConfig(host: String, port: String, provider: String) {
         activity.runOnUiThread { activity.saveServerConfig(host, port, provider) }
+    }
+    @JavascriptInterface
+    fun setMerchantConfig(name: String, address: String) {
+        activity.runOnUiThread { activity.saveMerchantConfig(name, address) }
     }
     @JavascriptInterface
     fun initDevice() { activity.runOnUiThread { activity.initPaymentDevice() } }
